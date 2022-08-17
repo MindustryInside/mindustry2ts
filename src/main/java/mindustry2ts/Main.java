@@ -36,87 +36,94 @@ public class Main {
             Files.createDirectory(resultDir);
         }
 
-        String filename = "call.ts";
-        try (Writer call = Files.newBufferedWriter(resultDir.resolve(filename))) {
-            call.append("export default class Call {\n\n");
-            // Метод со статической регистрацией
-            StringBuilder registerPackets = new StringBuilder();
-            registerPackets.append("\tpublic static registerPackets(): void {\n");
+        Writer index = Files.newBufferedWriter(resultDir.resolve("index.d.ts"));
+        Writer call = Files.newBufferedWriter(resultDir.resolve("call.ts"));
 
-            for (var e : packetToId) {
-                String simpleName = e.key.getSimpleName();
-                registerPackets.append("\t\tNet.registerPacket(").append(simpleName).append(", ");
-                registerPackets.append(simpleName).append(".ID);\n");
+        call.append("import * as p from './index';\n\n");
+        call.append("export default class Call {\n\n");
+        // Метод со статической регистрацией
+        StringBuilder registerPackets = new StringBuilder();
+        registerPackets.append("\tpublic static registerPackets(): void {\n");
 
-                generatePacket(e.key, e.value);
-            }
+        for (var e : packetToId) {
+            String simpleName = e.key.getSimpleName();
+            String filename = Strings.camelToKebab(simpleName);
 
-            // Есть проблемы с определением пакетов
-            // for (Method method : Call.class.getDeclaredMethods()) {
-            //     if (method.getName().equals("registerPackets")) continue;
-            //
-            //     boolean forwarded = method.getName().endsWith("__forward");
-            //     boolean toAll = true;
-            //     StringJoiner paramsJoiner = new StringJoiner(", ");
-            //
-            //     var params = method.getParameters();
-            //
-            //     // Возможно это тот, кому нужно отослать пакет, так что вот
-            //     boolean firstIsNetCon = params.length >= 1 && params[0].getType() == NetConnection.class;
-            //     int offset = firstIsNetCon ? 1 : 0;
-            //     String typeSeq = Arrays.stream(params).skip(offset)
-            //             .map(p -> p.getParameterizedType().toString())
-            //             .collect(Collectors.joining(","));
-            //
-            //     Class<?> type = fieldsToTypes.get(typeSeq);
-            //     if (type == null)
-            //         System.out.println(typeSeq);
-            //     var fields = Arrays.stream(type.getDeclaredFields())
-            //             .filter(f -> !f.getName().equals("DATA"))
-            //             .collect(Collectors.toList());
-            //
-            //     for (int i = 0; i < params.length; i++) {
-            //         Parameter p = params[i];
-            //         String name;
-            //         if (i == 0 && firstIsNetCon) {
-            //             name = forwarded ? "exceptConnection" : "playerConnection";
-            //         } else {
-            //             name = fields.get(i - offset).getName();
-            //         }
-            //
-            //         paramsJoiner.add(name + ": " + mapType(p.getParameterizedType()));
-            //     }
-            //
-            //     // boolean overload = forwarded;
-            //
-            //     call.append('\t');
-            //     if (!forwarded) {
-            //         call.append("public ");
-            //     }
-            //
-            //     call.append("static ").append(method.getName()).append("(");
-            //     call.append(paramsJoiner.toString()).append(") {}\n\n");
-            // }
+            registerPackets.append("\t\tNet.registerPacket(p.").append(simpleName).append(", p.");
+            registerPackets.append(simpleName).append(".ID);\n");
 
-            registerPackets.append("\t}");
-            call.append(registerPackets);
-            call.append("\n}\n");
+            index.append("export {").append(simpleName).append("} from './").append(filename).append("';\n");
+
+            generatePacket(filename + ".ts", e.key, e.value);
         }
+
+        // Есть проблемы с определением пакетов
+        // for (Method method : Call.class.getDeclaredMethods()) {
+        //     if (method.getName().equals("registerPackets")) continue;
+        //
+        //     boolean forwarded = method.getName().endsWith("__forward");
+        //     boolean toAll = true;
+        //     StringJoiner paramsJoiner = new StringJoiner(", ");
+        //
+        //     var params = method.getParameters();
+        //
+        //     // Возможно это тот, кому нужно отослать пакет, так что вот
+        //     boolean firstIsNetCon = params.length >= 1 && params[0].getType() == NetConnection.class;
+        //     int offset = firstIsNetCon ? 1 : 0;
+        //     String typeSeq = Arrays.stream(params).skip(offset)
+        //             .map(p -> p.getParameterizedType().toString())
+        //             .collect(Collectors.joining(","));
+        //
+        //     Class<?> type = fieldsToTypes.get(typeSeq);
+        //     if (type == null)
+        //         System.out.println(typeSeq);
+        //     var fields = Arrays.stream(type.getDeclaredFields())
+        //             .filter(f -> !f.getName().equals("DATA"))
+        //             .collect(Collectors.toList());
+        //
+        //     for (int i = 0; i < params.length; i++) {
+        //         Parameter p = params[i];
+        //         String name;
+        //         if (i == 0 && firstIsNetCon) {
+        //             name = forwarded ? "exceptConnection" : "playerConnection";
+        //         } else {
+        //             name = fields.get(i - offset).getName();
+        //         }
+        //
+        //         paramsJoiner.add(name + ": " + mapType(p.getParameterizedType()));
+        //     }
+        //
+        //     // boolean overload = forwarded;
+        //
+        //     call.append('\t');
+        //     if (!forwarded) {
+        //         call.append("public ");
+        //     }
+        //
+        //     call.append("static ").append(method.getName()).append("(");
+        //     call.append(paramsJoiner.toString()).append(") {}\n\n");
+        // }
+
+        registerPackets.append("\t}");
+        call.append(registerPackets);
+        call.append("\n}\n");
+
+        index.close();
+        call.close();
 
         System.out.println("unhandled types = " + types);
     }
 
-    static void generatePacket(Class<?> klass, int id) throws Throwable {
+    static void generatePacket(String filename, Class<?> klass, int id) throws Throwable {
         String name = klass.getSimpleName();
-        var filename = Strings.camelToKebab(name) + ".ts";
         try (var writer = Files.newBufferedWriter(resultDir.resolve(filename))) {
-            List<Field> fields = Arrays.stream(klass.getDeclaredFields())
+            var fields = Arrays.stream(klass.getDeclaredFields())
                     .filter(f -> !f.getName().equals("DATA"))
                     .collect(Collectors.toList());
             boolean empty = fields.isEmpty(); // ради красивого форматирования
             collectImports(writer, fields);
 
-            writer.append("export default class ").append(name).append(" implements Packet {\n");
+            writer.append("export class ").append(name).append(" implements Packet {\n");
             writer.append("\tpublic static ID = ").append(Integer.toString(id)).append(";\n\n");
 
             StringJoiner params = new StringJoiner(", ");
@@ -155,7 +162,7 @@ public class Main {
             }
 
             if (!empty) {
-                writer.append('\n'); // немного красоты
+                writer.append('\n');
 
                 // конструктор без параметров
                 writer.append("\tconstructor();\n\n");
@@ -170,7 +177,7 @@ public class Main {
                 writer.append("\t}\n\n");
             }
 
-            // id(): number метод
+            // getId(): number метод
             writer.append("\tgetId() {\n");
             writer.append("\t\treturn ").append(name).append(".ID;\n");
             writer.append("\t}\n\n");
