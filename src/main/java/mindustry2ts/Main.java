@@ -17,17 +17,16 @@ import java.util.stream.Collectors;
 
 public class Main {
 
+    static int lineWrap = 100;
+
     static Path resultDir = Path.of("result/");
 
     static ObjectIntMap<Class<?>> packetToId = Reflect.get(Net.class, "packetToId");
 
-    static Set<String> defaultImports = Set.of(
+    static Set<String> imports = Set.of(
             "import {BufferWriter, BufferReader} from '../io';",
-            "import {Packet} from './packet';");
-
-    static Map<Class<?>, String> mappedImports = Map.of(
-            String.class, "import {Nullable} from '../util/types/nullable';"
-    );
+            "import {Packet} from './packet';",
+            "import {Nullable} from '../util/types/nullable';");
 
     static Set<String> types = new TreeSet<>();
 
@@ -36,25 +35,29 @@ public class Main {
             Files.createDirectory(resultDir);
         }
 
-        Writer index = Files.newBufferedWriter(resultDir.resolve("index.d.ts"));
+        Writer packets = Files.newBufferedWriter(resultDir.resolve("packets.ts"));
         Writer call = Files.newBufferedWriter(resultDir.resolve("call.ts"));
 
-        call.append("import * as p from './index';\n\n");
+        call.append("import {Packets as p} from './packets';\n\n");
         call.append("export default class Call {\n\n");
         // Метод со статической регистрацией
         StringBuilder registerPackets = new StringBuilder();
         registerPackets.append("\tpublic static registerPackets(): void {\n");
 
+        for (String anImport : imports) {
+            packets.append(anImport).append('\n');
+        }
+
+        packets.append('\n');
+        packets.append("export namespace Packets {\n");
+
         for (var e : packetToId) {
             String simpleName = e.key.getSimpleName();
-            String filename = Strings.camelToKebab(simpleName);
 
             registerPackets.append("\t\tNet.registerPacket(p.").append(simpleName).append(", p.");
             registerPackets.append(simpleName).append(".ID);\n");
 
-            index.append("export {").append(simpleName).append("} from './").append(filename).append("';\n");
-
-            generatePacket(filename + ".ts", e.key, e.value);
+            generatePacket(packets, e.key, e.value);
         }
 
         // Есть проблемы с определением пакетов
@@ -108,105 +111,101 @@ public class Main {
         call.append(registerPackets);
         call.append("\n}\n");
 
-        index.close();
+        packets.append("}\n");
+
+        packets.close();
         call.close();
 
         System.out.println("unhandled types = " + types);
     }
 
-    static void generatePacket(String filename, Class<?> klass, int id) throws Throwable {
+    static void generatePacket(Writer packets, Class<?> klass, int id) throws Throwable {
         String name = klass.getSimpleName();
-        try (var writer = Files.newBufferedWriter(resultDir.resolve(filename))) {
-            var fields = Arrays.stream(klass.getDeclaredFields())
-                    .filter(f -> !f.getName().equals("DATA"))
-                    .collect(Collectors.toList());
-            boolean empty = fields.isEmpty(); // ради красивого форматирования
-            collectImports(writer, fields);
+        var fields = Arrays.stream(klass.getDeclaredFields())
+                .filter(f -> !f.getName().equals("DATA"))
+                .collect(Collectors.toList());
+        boolean empty = fields.isEmpty(); // ради красивого форматирования
 
-            writer.append("export class ").append(name).append(" implements Packet {\n");
-            writer.append("\tpublic static ID = ").append(Integer.toString(id)).append(";\n\n");
+        packets.append('\n'); // мы префиксно пишем разделитель
+        packets.append("\texport class ").append(name).append(" implements Packet {\n");
+        packets.append("\t\tpublic static ID = ").append(Integer.toString(id)).append(";\n\n");
 
-            StringJoiner params = new StringJoiner(", ");
-            StringBuilder assignments = new StringBuilder();
+        StringJoiner params = new StringJoiner(", ");
+        StringBuilder assignments = new StringBuilder();
 
-            StringBuilder serializer = new StringBuilder();
-            serializer.append("\tserialize(buf: BufferWriter) {");
+        StringBuilder serializer = new StringBuilder();
+        serializer.append("\t\tserialize(buf: BufferWriter) {");
 
-            StringBuilder deserializer = new StringBuilder();
-            deserializer.append("\tdeserialize(buf: BufferReader) {");
+        StringBuilder deserializer = new StringBuilder();
+        deserializer.append("\t\tdeserialize(buf: BufferReader) {");
 
-            if (!empty) {
-                serializer.append('\n');
-                deserializer.append('\n');
+        if (!empty) {
+            serializer.append('\n');
+            deserializer.append('\n');
+        } else {
+            serializer.append("}\n\n");
+            deserializer.append('}');
+        }
+
+        int line = 0;
+        for (int i = 0; i < fields.size(); i++) {
+            Field field = fields.get(i);
+            String mapType = mapType(field.getGenericType());
+
+            String param = field.getName() + ": " + mapType;
+            String lw;
+            if (line + param.length() >= lineWrap) {
+                lw = "\n\t\t\t\t";
+                line = 0;
             } else {
-                serializer.append("}\n\n");
-                deserializer.append('}');
+                lw = "";
             }
 
-            for (int i = 0, n = fields.size(); i < n; i++) {
-                Field field = fields.get(i);
-                String mapType = mapType(field.getGenericType());
+            params.add(lw + param);
+            line += param.length();
 
-                params.add(field.getName() + ": " + mapType);
+            // сериализация
+            serializer.append("\t\t\tbuf.").append(serializerMethod(field.getType(), klass)).append("(this.");
+            serializer.append(field.getName()).append(");\n");
 
-                // сериализация
-                serializer.append("\t\tbuf.").append(serializerMethod(field.getType(), klass)).append("(this.");
-                serializer.append(field.getName()).append(");\n");
+            // десериализация
+            deserializer.append("\t\t\tthis.").append(field.getName()).append(" = buf.");
+            deserializer.append(deserializerMethod(field.getType(), klass)).append("();\n");
 
-                // десериализация
-                deserializer.append("\t\tthis.").append(field.getName()).append(" = buf.");
-                deserializer.append(deserializerMethod(field.getType(), klass)).append("();\n");
-
-                assignments.append("\t\tthis.").append(field.getName()).append(" = args[").append(i).append("];\n");
-                writer.append("\tpublic ").append(field.getName()).append(": ").append(mapType).append(";\n");
-            }
-
-            if (!empty) {
-                writer.append('\n');
-
-                // конструктор без параметров
-                writer.append("\tconstructor();\n\n");
-
-                // и конструктор со всеми параметрами
-                writer.append("\tconstructor(").append(params.toString()).append(");\n\n");
-
-                // собственно реализация конструктора
-                writer.append("\tconstructor(...args: any[]) {\n");
-                writer.append("\t\tif (args.length == 0) return;\n");
-                writer.append(assignments);
-                writer.append("\t}\n\n");
-            }
-
-            // getId(): number метод
-            writer.append("\tgetId() {\n");
-            writer.append("\t\treturn ").append(name).append(".ID;\n");
-            writer.append("\t}\n\n");
-
-            if (!empty) {
-                serializer.append("\t}\n\n");
-                deserializer.append("\t}");
-            }
-
-            writer.append(serializer);
-
-            writer.append(deserializer);
-            writer.append("\n}\n");
-        }
-    }
-
-    static void collectImports(Writer writer, List<Field> fields) throws Throwable {
-        Set<String> imports = new TreeSet<>(defaultImports);
-        for (Field field : fields) {
-            String cl = mappedImports.get(field.getType());
-            if (cl != null) {
-                imports.add(cl);
-            }
+            assignments.append("\t\t\tthis.").append(field.getName()).append(" = args[").append(i).append("];\n");
+            packets.append("\t\tpublic ").append(field.getName()).append(": ").append(mapType).append(";\n");
         }
 
-        for (String anImport : imports) {
-            writer.append(anImport).append('\n');
+        if (!empty) {
+            packets.append('\n');
+
+            // конструктор без параметров
+            packets.append("\t\tconstructor();\n\n");
+
+            // и конструктор со всеми параметрами
+            packets.append("\t\tconstructor(").append(params.toString()).append(");\n\n");
+
+            // собственно реализация конструктора
+            packets.append("\t\tconstructor(...args: any[]) {\n");
+            packets.append("\t\t\tif (args.length == 0) return;\n");
+            packets.append(assignments);
+            packets.append("\t\t}\n\n");
         }
-        writer.append('\n');
+
+        // getId(): number метод
+        packets.append("\t\tgetId() {\n");
+        packets.append("\t\t\treturn ").append(name).append(".ID;\n");
+        packets.append("\t\t}\n\n");
+
+        if (!empty) {
+            serializer.append("\t\t}\n\n");
+            deserializer.append("\t\t}");
+        }
+
+        packets.append(serializer);
+
+        packets.append(deserializer);
+        packets.append("\n\t}\n");
     }
 
     static String serializerMethod(Class<?> type, Class<?> klass) {
