@@ -1,0 +1,19 @@
+apply plugin: 'application'
+
+repositories {
+    mavenCentral()
+    maven { url 'https://www.jitpack.io' }
+}
+
+ext {
+    versions = [:]
+    versions.mindustry = 'v137'
+}
+
+dependencies {
+    implementation "com.github.Anuken.Mindustry:core:$versions.mindustry"
+}
+
+application {
+    mainClass = 'mindustry2ts.Main'
+}
