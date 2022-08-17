@@ -12,23 +12,26 @@ import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.*;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.StringJoiner;
 import java.util.stream.Collectors;
 
 public class Main {
 
-    static int lineWrap = 100;
+    static final int lineWrap = 100;
 
-    static Path resultDir = Path.of("result/");
+    static final Path resultDir = Path.of("result/");
 
-    static ObjectIntMap<Class<?>> packetToId = Reflect.get(Net.class, "packetToId");
+    static final ObjectIntMap<Class<?>> packetToId = Reflect.get(Net.class, "packetToId");
 
-    static Set<String> imports = Set.of(
+    static final Set<String> imports = Set.of(
             "import {BufferWriter, BufferReader} from '../io';",
             "import {Packet} from './packet';",
             "import {Nullable} from '../util/types/nullable';");
 
-    static Set<String> types = new TreeSet<>();
+    static final Set<String> types = new HashSet<>();
 
     public static void main(String[] args) throws Throwable {
         if (Files.notExists(resultDir)) {
@@ -59,53 +62,6 @@ public class Main {
 
             generatePacket(packets, e.key, e.value);
         }
-
-        // Есть проблемы с определением пакетов
-        // for (Method method : Call.class.getDeclaredMethods()) {
-        //     if (method.getName().equals("registerPackets")) continue;
-        //
-        //     boolean forwarded = method.getName().endsWith("__forward");
-        //     boolean toAll = true;
-        //     StringJoiner paramsJoiner = new StringJoiner(", ");
-        //
-        //     var params = method.getParameters();
-        //
-        //     // Возможно это тот, кому нужно отослать пакет, так что вот
-        //     boolean firstIsNetCon = params.length >= 1 && params[0].getType() == NetConnection.class;
-        //     int offset = firstIsNetCon ? 1 : 0;
-        //     String typeSeq = Arrays.stream(params).skip(offset)
-        //             .map(p -> p.getParameterizedType().toString())
-        //             .collect(Collectors.joining(","));
-        //
-        //     Class<?> type = fieldsToTypes.get(typeSeq);
-        //     if (type == null)
-        //         System.out.println(typeSeq);
-        //     var fields = Arrays.stream(type.getDeclaredFields())
-        //             .filter(f -> !f.getName().equals("DATA"))
-        //             .collect(Collectors.toList());
-        //
-        //     for (int i = 0; i < params.length; i++) {
-        //         Parameter p = params[i];
-        //         String name;
-        //         if (i == 0 && firstIsNetCon) {
-        //             name = forwarded ? "exceptConnection" : "playerConnection";
-        //         } else {
-        //             name = fields.get(i - offset).getName();
-        //         }
-        //
-        //         paramsJoiner.add(name + ": " + mapType(p.getParameterizedType()));
-        //     }
-        //
-        //     // boolean overload = forwarded;
-        //
-        //     call.append('\t');
-        //     if (!forwarded) {
-        //         call.append("public ");
-        //     }
-        //
-        //     call.append("static ").append(method.getName()).append("(");
-        //     call.append(paramsJoiner.toString()).append(") {}\n\n");
-        // }
 
         registerPackets.append("\t}");
         call.append(registerPackets);
